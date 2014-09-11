@@ -217,3 +217,5 @@ func (n *IpfsNode) PinDagNode(nd *merkledag.Node) error {
 	u.DOut("Pinning node. Currently No-Op\n")
 	return nil
 }
+
+func (n *IpfsNode) SetIpnsEntry() {}
