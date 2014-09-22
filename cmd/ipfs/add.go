@@ -45,7 +45,6 @@ func addCmd(c *commander.Command, inp []string) error {
 	cmd.Opts["r"] = c.Flag.Lookup("r").Value.Get()
 	err := daemon.SendCommand(cmd, "localhost:12345")
 	if err != nil {
-		u.DOut("got err: %v\n", err)
 		u.DOut("Executing command locally.\n")
 		// Do locally
 		conf, err := getConfigDir(c.Parent)

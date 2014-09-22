@@ -218,8 +218,6 @@ func (s *SecurePipe) handleSecureIn(hashType string, tIV, tCKey, tMKey []byte) {
 	for {
 		data, ok := <-s.insecure.In
 		if !ok {
-			u.DOut("Closing incoming proxy.\n")
-			close(secureIn)
 			return
 		}
 
@@ -256,8 +254,6 @@ func (s *SecurePipe) handleSecureOut(hashType string, mIV, mCKey, mMKey []byte) 
 	for {
 		data, ok := <-s.Out
 		if !ok {
-			u.DOut("Closing outgoing proxy.\n")
-			close(secureOut)
 			return
 		}
 
