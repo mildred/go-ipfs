@@ -8,7 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	u "github.com/jbenet/go-ipfs/util"
+	ma "github.com/jbenet/go-ipfs/Godeps/_workspace/src/github.com/jbenet/go-multiaddr"
+	u  "github.com/jbenet/go-ipfs/util"
 )
 
 // Identity tracks the configuration of the local node's identity.
@@ -35,6 +36,14 @@ type Config struct {
 	Datastore  Datastore    // local node's storage
 	RPCAddress string       // local node's RPC address
 	Peers      []*SavedPeer // local nodes's bootstrap peers
+}
+
+func (c Config) RPCMultiAddress() (*ma.Multiaddr, error) {
+	if c.RPCAddress == "" {
+		return nil, errors.New("no config.RPCAddress endpoint supplied")
+	}
+
+	return ma.NewMultiaddr(c.RPCAddress);
 }
 
 const DefaultPathRoot = "~/.go-ipfs"

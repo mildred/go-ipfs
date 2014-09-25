@@ -27,6 +27,15 @@ type Command struct {
 	Opts    map[string]interface{}
 }
 
+func NewRPCDaemonListener(ipfsnode *core.IpfsNode) (*DaemonListener, error) {
+	ma, err := ipfsnode.Config.RPCMultiAddress()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewDaemonListener(ipfsnode, ma)
+}
+
 func NewDaemonListener(ipfsnode *core.IpfsNode, addr *ma.Multiaddr) (*DaemonListener, error) {
 	network, host, err := addr.DialArgs()
 	if err != nil {
