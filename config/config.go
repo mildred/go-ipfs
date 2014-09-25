@@ -76,12 +76,29 @@ func (i *Identity) DecodePrivateKey(passphrase string) (crypto.PrivateKey, error
 
 // Filename returns the proper tilde expanded config filename.
 func Filename(filename string) (string, error) {
-	if len(filename) == 0 {
-		return xdg.Config.Find("go-ipfs/config")
+	if len(filename) != 0 {
+		// tilde expansion on config file
+		return u.TildeExpansion(filename)
 	}
 
-	// tilde expansion on config file
-	return u.TildeExpansion(filename)
+	configFile, err := xdg.Config.Find("go-ipfs/config")
+	if err == nil {
+		return configFile, nil
+	}
+
+	configFile, err = xdg.Config.FindHome("go-ipfs/config")
+	if err != nil {
+		return configFile, err
+	}
+
+	oldConfigFile, err := u.TildeExpansion("~/.go-ipfs/config")
+	if(err == nil) {
+		if _, err = os.Stat(oldConfigFile); err == nil {
+			os.Rename(oldConfigFile, configFile)
+		}
+	}
+
+	return configFile, nil
 }
 
 // Load reads given file (empty string to get default file) and returns the read config, or error.
