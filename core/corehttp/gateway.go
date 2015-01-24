@@ -6,11 +6,13 @@ import (
 	core "github.com/jbenet/go-ipfs/core"
 )
 
-func GatewayOption(n *core.IpfsNode, mux *http.ServeMux) error {
-	gateway, err := newGatewayHandler(n)
-	if err != nil {
-		return err
+func GatewayOption(writable bool) ServeOption {
+	return func(n *core.IpfsNode, mux *http.ServeMux) error {
+		gateway, err := newGatewayHandler(n, writable)
+		if err != nil {
+			return err
+		}
+		mux.Handle("/ipfs/", gateway)
+		return nil
 	}
-	mux.Handle("/ipfs/", gateway)
-	return nil
 }
