@@ -1,9 +1,11 @@
 package corehttp
 
 import (
+	b64 "encoding/base64"
 	"fmt"
 	"html/template"
 	"io"
+	"io/ioutil"
 	"mime"
 	"net/http"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/jbenet/go-ipfs/importer"
 	chunk "github.com/jbenet/go-ipfs/importer/chunk"
 	dag "github.com/jbenet/go-ipfs/merkledag"
+	crypto "github.com/jbenet/go-ipfs/p2p/crypto"
 	p "github.com/jbenet/go-ipfs/path"
 	"github.com/jbenet/go-ipfs/routing"
 	ufs "github.com/jbenet/go-ipfs/unixfs"
@@ -68,7 +71,25 @@ func (i *gatewayHandler) loadTemplate() error {
 	return nil
 }
 
+func (i *gatewayHandler) resolveNamePath(path string) (string, error) {
+	if path[0:5] == "/ipns" {
+		ipns_record, _, pathext := u.Partition(path[6:], "/")
+
+		value, err := i.node.Namesys.Resolve(ipns_record)
+		if err != nil {
+			return "", err
+		}
+
+		path = "/ipfs/" + value + "/" + pathext
+	}
+	return path, nil
+}
+
 func (i *gatewayHandler) ResolvePath(path string) (*dag.Node, error) {
+	path, err := i.resolveNamePath(path)
+	if err != nil {
+		return nil, err
+	}
 	return i.node.Resolver.ResolvePath(path)
 }
 
@@ -90,30 +111,39 @@ func (i *gatewayHandler) NewDagReader(nd *dag.Node) (io.Reader, error) {
 }
 
 func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path[5:]
-
-	if i.writable && r.Method == "POST" && path == "/" {
+	if i.writable && r.Method == "POST" {
 		i.postHandler(w, r)
 		return
 	}
 
 	if i.writable && r.Method == "PUT" {
-		i.putHandler(w, r, path)
+		i.putHandler(w, r, r.URL.Path)
 		return
 	}
 
 	if i.writable && r.Method == "DELETE" {
-		i.deleteHandler(w, r, path)
+		i.deleteHandler(w, r, r.URL.Path)
 		return
 	}
 
-	if r.Method != "GET" {
+	if r.Method == "GET" {
+		i.getHandler(w, r, r.URL.Path)
+		return
+	}
+
+	errmsg := "Method " + r.Method + " not allowed: "
+	if !i.writable {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("Method " + r.Method + " not allowed: bad request or read only access"))
-		log.Error("Method %s not allowed: bad request or read only access")
-		return
+		errmsg = errmsg + "read only access"
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		errmsg = errmsg + "bad request for " + r.URL.Path
 	}
+	w.Write([]byte(errmsg))
+	log.Error(errmsg)
+}
 
+func (i *gatewayHandler) getHandler(w http.ResponseWriter, r *http.Request, path string) {
 	nd, err := i.ResolvePath(path)
 	if err != nil {
 		if err == routing.ErrNotFound {
@@ -153,7 +183,7 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Debug("listing directory")
 	if path[len(path)-1:] != "/" {
 		log.Debug("missing trailing slash, redirect")
-		http.Redirect(w, r, "/ipfs/"+path+"/", 307)
+		http.Redirect(w, r, path+"/", 307)
 		return
 	}
 
@@ -195,6 +225,12 @@ func (i *gatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (i *gatewayHandler) postHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Header.Get("IPNS") == "Update" {
+		i.postNameHandler(w, r)
+		return
+	}
+
 	nd, err := i.NewDagFromReader(r.Body)
 	if err != nil {
 		internalWebError(w, err)
@@ -207,10 +243,46 @@ func (i *gatewayHandler) postHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/ipfs/"+mh.Multihash(k).B58String(), http.StatusCreated)
+	h := mh.Multihash(k).B58String()
+	w.Header().Set("IPFS-Hash", h)
+	http.Redirect(w, r, "/ipfs/"+h, http.StatusCreated)
 }
 
-func (i *gatewayHandler) putEmptyDirHandler(w http.ResponseWriter, r *http.Request, path string) {
+func (i *gatewayHandler) postNameHandler(w http.ResponseWriter, r *http.Request) {
+	keydata, err := b64.StdEncoding.DecodeString(r.Header.Get("IPNS-PublicKey"))
+	if err != nil {
+		webError(w, "Could not decode header IPNS-PublicKey", err, http.StatusBadRequest)
+		return
+	}
+
+	var pubkey crypto.PubKey
+	key_type := strings.ToLower(r.Header.Get("IPNS-PublicKey-Type"))
+	if key_type == "rsa" {
+		pubkey, err = crypto.UnmarshalRsaPublicKey(keydata)
+		if err != nil {
+			webError(w, "Could not decode RSA Public Key", err, http.StatusBadRequest)
+			return
+		}
+	} else {
+		webError(w, "Could not recognize key type "+key_type, err, http.StatusBadRequest)
+		return
+	}
+
+	pkbytes, err := pubkey.Bytes()
+	if err != nil {
+		webError(w, "Could not read key bytes", err, http.StatusInternalServerError)
+		return
+	}
+	nameb := u.Hash(pkbytes)
+
+	data, err := ioutil.ReadAll(r.Body)
+	i.node.Namesys.PublishEntry(pubkey, data)
+
+	w.Header().Set("IPFS-Hash", string(nameb))
+	http.Redirect(w, r, "/ipns/"+string(nameb), http.StatusCreated)
+}
+
+func (i *gatewayHandler) putEmptyDirHandler(w http.ResponseWriter, r *http.Request) {
 	newnode := NewDagEmptyDir()
 
 	key, err := i.node.DAG.Add(newnode)
@@ -219,18 +291,20 @@ func (i *gatewayHandler) putEmptyDirHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	w.Header().Set("IPFS-Hash", key.String())
 	http.Redirect(w, r, "/ipfs/"+key.String()+"/", http.StatusCreated)
 }
 
 func (i *gatewayHandler) putHandler(w http.ResponseWriter, r *http.Request, path string) {
+	pathext := path[5:]
 	var err error
-	if path == "/QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn/" {
-		i.putEmptyDirHandler(w, r, path)
+	if path == "/ipfs/QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn/" {
+		i.putEmptyDirHandler(w, r)
 		return
 	}
 
 	var newnode *dag.Node
-	if path[len(path)-1] == '/' {
+	if pathext[len(pathext)-1] == '/' {
 		newnode = NewDagEmptyDir()
 	} else {
 		newnode, err = i.NewDagFromReader(r.Body)
@@ -240,7 +314,14 @@ func (i *gatewayHandler) putHandler(w http.ResponseWriter, r *http.Request, path
 		}
 	}
 
-	h, components, err := p.SplitAbsPath(path)
+	ipfspath, err := i.resolveNamePath(path)
+	if err != nil {
+		// FIXME HTTP error code
+		webError(w, "Could not resolve name", err, http.StatusInternalServerError)
+		return
+	}
+
+	h, components, err := p.SplitAbsPath(ipfspath)
 	if err != nil {
 		webError(w, "Could not split path", err, http.StatusInternalServerError)
 		return
@@ -294,11 +375,19 @@ func (i *gatewayHandler) putHandler(w http.ResponseWriter, r *http.Request, path
 		return
 	}
 
+	w.Header().Set("IPFS-Hash", key.String())
 	http.Redirect(w, r, "/ipfs/"+key.String()+"/"+strings.Join(components, "/"), http.StatusCreated)
 }
 
 func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request, path string) {
-	h, components, err := p.SplitAbsPath(path)
+	ipfspath, err := i.resolveNamePath(path)
+	if err != nil {
+		// FIXME HTTP error code
+		webError(w, "Could not resolve name", err, http.StatusInternalServerError)
+		return
+	}
+
+	h, components, err := p.SplitAbsPath(ipfspath)
 	if err != nil {
 		webError(w, "Could not split path", err, http.StatusInternalServerError)
 		return
@@ -344,6 +433,7 @@ func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 
+	w.Header().Set("IPFS-Hash", key.String())
 	http.Redirect(w, r, "/ipfs/"+key.String()+"/"+strings.Join(components[:len(components)-1], "/"), http.StatusCreated)
 }
 

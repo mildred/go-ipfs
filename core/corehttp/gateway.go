@@ -13,6 +13,7 @@ func GatewayOption(writable bool) ServeOption {
 			return err
 		}
 		mux.Handle("/ipfs/", gateway)
+		mux.Handle("/ipns/", gateway)
 		return nil
 	}
 }
