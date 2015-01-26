@@ -38,6 +38,12 @@ type Resolver interface {
 type Publisher interface {
 
 	// Publish establishes a name-value mapping.
+	// name is the private key to use to publish
+	// value is a b58 encoded string of the key to store in the record
 	// TODO make this not PrivKey specific.
 	Publish(name ci.PrivKey, value string) error
+
+	// Publish the entry which must decode to a valid ProtoBuf entry and must be
+	// signed by the public key as the signature.
+	PublishEntry(key ci.PubKey, entry []byte) error
 }

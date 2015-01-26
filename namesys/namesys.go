@@ -55,3 +55,8 @@ func (ns *ipns) CanResolve(name string) bool {
 func (ns *ipns) Publish(name ci.PrivKey, value string) error {
 	return ns.publisher.Publish(name, value)
 }
+
+// PublishEntry implements Publisher
+func (ns *ipns) PublishEntry(key ci.PubKey, entry []byte) error {
+	return ns.publisher.PublishEntry(key, entry)
+}

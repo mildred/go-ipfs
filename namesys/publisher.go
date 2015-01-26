@@ -47,13 +47,48 @@ func (p *ipnsPublisher) Publish(k ci.PrivKey, value string) error {
 		return fmt.Errorf("publish value must be str multihash. %v", err)
 	}
 
-	ctx := context.TODO()
 	data, err := createRoutingEntryData(k, value)
 	if err != nil {
 		log.Error("entry creation failed.")
 		return err
 	}
 	pubkey := k.GetPublic()
+
+	return p.publishData(pubkey, data)
+}
+
+func createRoutingEntryData(pk ci.PrivKey, val string) ([]byte, error) {
+	entry := new(pb.IpnsEntry)
+
+	entry.Value = []byte(val)
+	typ := pb.IpnsEntry_EOL
+	entry.ValidityType = &typ
+	entry.Validity = []byte(u.FormatRFC3339(time.Now().Add(time.Hour * 24)))
+
+	sig, err := pk.Sign(ipnsEntryDataForSig(entry))
+	if err != nil {
+		return nil, err
+	}
+	entry.Signature = sig
+	return proto.Marshal(entry)
+}
+
+func (p *ipnsPublisher) PublishEntry(key ci.PubKey, entry []byte) error {
+	entry_object := new(pb.IpnsEntry)
+	err := proto.Unmarshal(entry, entry_object)
+	if err != nil {
+		return err
+	}
+
+	if ok, err := key.Verify(ipnsEntryDataForSig(entry_object), entry_object.GetSignature()); err != nil || !ok {
+		return fmt.Errorf("Invalid value. Not signed by PrivateKey corresponding to %v", key)
+	}
+
+	return p.publishData(key, entry)
+}
+
+func (p *ipnsPublisher) publishData(pubkey ci.PubKey, data []byte) error {
+	ctx := context.TODO()
 	pkbytes, err := pubkey.Bytes()
 	if err != nil {
 		log.Error("pubkey getbytes failed.")
@@ -82,22 +117,6 @@ func (p *ipnsPublisher) Publish(k ci.PrivKey, value string) error {
 	}
 
 	return nil
-}
-
-func createRoutingEntryData(pk ci.PrivKey, val string) ([]byte, error) {
-	entry := new(pb.IpnsEntry)
-
-	entry.Value = []byte(val)
-	typ := pb.IpnsEntry_EOL
-	entry.ValidityType = &typ
-	entry.Validity = []byte(u.FormatRFC3339(time.Now().Add(time.Hour * 24)))
-
-	sig, err := pk.Sign(ipnsEntryDataForSig(entry))
-	if err != nil {
-		return nil, err
-	}
-	entry.Signature = sig
-	return proto.Marshal(entry)
 }
 
 func ipnsEntryDataForSig(e *pb.IpnsEntry) []byte {
