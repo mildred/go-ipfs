@@ -1,41 +1,22 @@
 package merkledag
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"sort"
 
 	mh "github.com/ipfs/go-ipfs/Godeps/_workspace/src/github.com/jbenet/go-multihash"
 
 	pb "github.com/ipfs/go-ipfs/merkledag/pb"
 	u "github.com/ipfs/go-ipfs/util"
+	ipld "github.com/ipfs/go-ipld"
+	ipldcoding "github.com/ipfs/go-ipld/coding"
 )
 
 // for now, we use a PBNode intermediate thing.
 // because native go objects are nice.
-
-// unmarshal decodes raw data into a *Node instance.
-// The conversion uses an intermediate PBNode.
-func (n *Node) unmarshal(encoded []byte) error {
-	var pbn pb.PBNode
-	if err := pbn.Unmarshal(encoded); err != nil {
-		return fmt.Errorf("Unmarshal failed. %v", err)
-	}
-
-	pbnl := pbn.GetLinks()
-	n.Links = make([]*Link, len(pbnl))
-	for i, l := range pbnl {
-		n.Links[i] = &Link{Name: l.GetName(), Size: l.GetTsize()}
-		h, err := mh.Cast(l.GetHash())
-		if err != nil {
-			return fmt.Errorf("Link hash is not valid multihash. %v", err)
-		}
-		n.Links[i].Hash = h
-	}
-	sort.Stable(LinkSlice(n.Links)) // keep links sorted
-
-	n.Data = pbn.GetData()
-	return nil
-}
 
 // Marshal encodes a *Node instance into a new byte slice.
 // The conversion uses an intermediate PBNode.
@@ -86,10 +67,47 @@ func (n *Node) Encoded(force bool) ([]byte, error) {
 
 // Decoded decodes raw data and returns a new Node instance.
 func DecodeProtobuf(encoded []byte) (*Node, error) {
-	n := new(Node)
-	err := n.unmarshal(encoded)
+	r, err := ipldcoding.DecodeLegacyProtobufBytes(encoded)
 	if err != nil {
-		return nil, fmt.Errorf("incorrectly formatted merkledag node: %s", err)
+		return nil, err
 	}
-	return n, nil
+
+	n := new(Node)
+	var links []Link
+
+	it := ipld.Iterate(r, nil)
+	defer it.Close()
+	for it.Iter() {
+		if it.TokenType == ipld.TokenNode {
+			path := item.StringPath()
+			name := ""
+			if len(path) > 0 {
+				name = path[len(path)-1]
+			}
+			links = append(links, Link{name, 0, nil, nil})
+
+		} else if it.TokenType == ipld.TokenKey && it.Value == ipld.LinkKey {
+			it.Iter()
+			h, err := ipld.ReadLinkPath(it.Value)
+			if err == nil {
+				links[len(links)-1].Hash = h
+			}
+
+		} else if it.TokenType == ipld.TokenKey && it.Value == "size" {
+			it.Iter()
+			if s, ok := it.ToUint(); ok {
+				links[len(links)-1].Size = s
+			}
+
+		} else if it.Token == ipld.TokenEndNode {
+			lastLink = &links[len(links)-1]
+			if lastLink.Hash != nil && lastLink.Name != "" {
+				Node.Links = append(Node.Links, lastLink)
+			}
+			links = links[:len(links)-1]
+		}
+		return nil
+	}
+
+	return n, it.LastError
 }
