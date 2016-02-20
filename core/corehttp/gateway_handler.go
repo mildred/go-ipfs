@@ -454,6 +454,10 @@ func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request) {
 
 	newnode := pathNodes[len(pathNodes)-1]
 	for i := len(pathNodes) - 2; i >= 0; i-- {
+		if err := i.node.DAG.Add(newnode); err != nil {
+			webError(w, "Could not add node", err, http.StatusInternalServerError)
+			return
+		}
 		newnode, err = pathNodes[i].UpdateNodeLink(components[i], newnode)
 		if err != nil {
 			webError(w, "Could not update node links", err, http.StatusInternalServerError)
@@ -461,8 +465,8 @@ func (i *gatewayHandler) deleteHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := i.node.DAG.AddRecursive(newnode); err != nil {
-		webError(w, "Could not add recursively new node", err, http.StatusInternalServerError)
+	if err := i.node.DAG.Add(newnode); err != nil {
+		webError(w, "Could not add recursively root node", err, http.StatusInternalServerError)
 		return
 	}
 
