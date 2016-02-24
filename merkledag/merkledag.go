@@ -20,6 +20,7 @@ type DAGService interface {
 	AddRecursive(*Node) error
 	Get(context.Context, key.Key) (*Node, error)
 	Remove(*Node) error
+	RemoveRecursive(*Node) error
 
 	// GetDAG returns, in order, all the single leve child
 	// nodes of the passed in node.
@@ -104,6 +105,20 @@ func (n *dagService) Get(ctx context.Context, k key.Key) (*Node, error) {
 	}
 
 	return DecodeProtobuf(b.Data)
+}
+
+// Remove deletes the given node and all of its children from the BlockService
+func (n *dagService) RemoveRecursive(nd *Node) error {
+	for _, l := range nd.Links {
+		if l.node != nil {
+			n.RemoveRecursive(l.node)
+		}
+	}
+	k, err := nd.Key()
+	if err != nil {
+		return err
+	}
+	return n.Blocks.DeleteBlock(k)
 }
 
 func (n *dagService) Remove(nd *Node) error {
