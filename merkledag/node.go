@@ -75,7 +75,7 @@ func MakeLink(n *Node) (*Link, error) {
 
 // GetNode returns the MDAG Node that this link points to
 func (l *Link) GetNode(ctx context.Context, serv DAGService) (*Node, error) {
-	return serv.Get(ctx, key.Key(l.Hash))
+	return serv.GetPB(ctx, key.Key(l.Hash))
 }
 
 // AddNodeLink adds a link to another node.

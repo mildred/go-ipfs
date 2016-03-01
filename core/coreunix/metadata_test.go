@@ -65,7 +65,7 @@ func TestMetadata(t *testing.T) {
 		t.Fatalf("something went wrong in conversion: '%s' != '%s'", rec.MimeType, m.MimeType)
 	}
 
-	retnode, err := ds.Get(ctx, key.B58KeyDecode(mdk))
+	retnode, err := ds.GetPB(ctx, key.B58KeyDecode(mdk))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -149,7 +149,7 @@ func TestAddGCLive(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	root, err := node.DAG.Get(ctx, last)
+	root, err := node.DAG.GetPB(ctx, last)
 	if err != nil {
 		t.Fatal(err)
 	}

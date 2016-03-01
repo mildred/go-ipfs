@@ -200,7 +200,7 @@ func runBatchFetchTest(t *testing.T, read io.Reader) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			first, err := dagservs[i].Get(ctx, k)
+			first, err := dagservs[i].GetPB(ctx, k)
 			if err != nil {
 				errs <- err
 			}
@@ -239,7 +239,7 @@ func assertCanGet(t *testing.T, ds DAGService, n *Node) {
 		t.Fatal(err)
 	}
 
-	if _, err := ds.Get(context.Background(), k); err != nil {
+	if _, err := ds.GetPB(context.Background(), k); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -253,7 +253,7 @@ func TestCantGet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = dsp.ds.Get(context.Background(), k)
+	_, err = dsp.ds.GetPB(context.Background(), k)
 	if !strings.Contains(err.Error(), "not found") {
 		t.Fatal("expected err not found, got: ", err)
 	}
@@ -313,7 +313,7 @@ func TestEnumerateChildren(t *testing.T) {
 			if !ks.Has(k) {
 				t.Fatal("missing key in set!")
 			}
-			child, err := ds.Get(context.Background(), k)
+			child, err := ds.GetPB(context.Background(), k)
 			if err != nil {
 				t.Fatal(err)
 			}
