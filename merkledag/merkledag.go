@@ -8,6 +8,9 @@ import (
 	blocks "github.com/ipfs/go-ipfs/blocks"
 	key "github.com/ipfs/go-ipfs/blocks/key"
 	bserv "github.com/ipfs/go-ipfs/blockservice"
+	ipldc "github.com/ipfs/go-ipld/coding"
+	iplds "github.com/ipfs/go-ipld/stream"
+	mh "gx/ipfs/QmYf7ng2hG5XBtJA3tN34DQ2GUN5HNksEw1rLDkmr6vGku/go-multihash"
 	"gx/ipfs/QmZy2y8t9zQH2a1b8q2ZSLKp17ATuJoCNxxyMFG5qFExpt/go-net/context"
 	logging "gx/ipfs/Qmazh5oNUVsDZTs2g59rq8aYQqwpss8tcUWQzor5sCCEuH/go-log"
 )
@@ -19,6 +22,7 @@ var ErrNotFound = fmt.Errorf("merkledag: not found")
 type DAGService interface {
 	Add(*Node) (key.Key, error)
 	GetPB(context.Context, key.Key) (*Node, error)
+	Get(context.Context, key.Key) (IPLDNode, error)
 	Remove(*Node) error
 
 	// GetDAG returns, in order, all the single leve child
@@ -64,6 +68,36 @@ func (n *dagService) Add(nd *Node) (key.Key, error) {
 
 func (n *dagService) Batch() *Batch {
 	return &Batch{ds: n, MaxSize: 8 * 1024 * 1024}
+}
+
+// Get retrieves an IPLD node from the dagService, fetching the block in the
+// BlockService
+func (n *dagService) Get(ctx context.Context, k key.Key) (IPLDNode, error) {
+	if n == nil {
+		return nil, fmt.Errorf("dagService is nil")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	b, err := n.Blocks.GetBlock(ctx, k)
+	if err != nil {
+		if err == bserv.ErrNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	var nd iplds.NodeReader
+	if ipldc.HasHeader(b.Data) {
+		nd, err = ipldc.DecodeBytes(b.Data)
+	} else {
+		nd, err = ipldc.DecodeLegacyProtobufBytes(b.Data)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return &ipldNode{nd, mh.Multihash(k), uint64(len(b.Data))}, nil
 }
 
 // GetPB retrieves a Protocol Buffer node from the dagService, fetching the
@@ -251,6 +285,11 @@ type nodePromise struct {
 // cached node.
 type NodeGetter interface {
 	GetPB(context.Context) (*Node, error)
+	Get(context.Context) (IPLDNode, error)
+}
+
+func (np *nodePromise) Get(ctx context.Context) (IPLDNode, error) {
+	return nil, fmt.Errorf("Not yet implemented")
 }
 
 func (np *nodePromise) GetPB(ctx context.Context) (*Node, error) {

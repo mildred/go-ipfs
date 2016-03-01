@@ -6,10 +6,37 @@ import (
 	"gx/ipfs/QmZy2y8t9zQH2a1b8q2ZSLKp17ATuJoCNxxyMFG5qFExpt/go-net/context"
 
 	key "github.com/ipfs/go-ipfs/blocks/key"
+	ipldlinks "github.com/ipfs/go-ipld/links"
+	ipldstream "github.com/ipfs/go-ipld/stream"
 	mh "gx/ipfs/QmYf7ng2hG5XBtJA3tN34DQ2GUN5HNksEw1rLDkmr6vGku/go-multihash"
 )
 
 var ErrLinkNotFound = fmt.Errorf("no link by that name")
+
+type IPLDNode interface {
+	ipldstream.NodeReader
+	Multihash() (mh.Multihash, error)
+	Key() (key.Key, error)
+	Size() (uint64, error)
+}
+
+type ipldNode struct {
+	ipldstream.NodeReader
+	hash mh.Multihash
+	size uint64
+}
+
+func (n *ipldNode) Key() (key.Key, error) {
+	return key.Key(n.hash), nil
+}
+
+func (n *ipldNode) Multihash() (mh.Multihash, error) {
+	return n.hash, nil
+}
+
+func (n *ipldNode) Size() (uint64, error) {
+	return n.size, nil
+}
 
 // Node represents a node in the IPFS Merkle DAG.
 // nodes have opaque data and a set of navigable links.
@@ -247,4 +274,111 @@ func (n *Node) Multihash() (mh.Multihash, error) {
 func (n *Node) Key() (key.Key, error) {
 	h, err := n.Multihash()
 	return key.Key(h), err
+}
+
+func (n *Node) Read(fun ipldstream.ReadFun) error {
+	err := readNode(n, fun)
+	if err == ipldstream.NodeReadAbort || err == ipldstream.NodeReadSkip {
+		err = nil
+	}
+	return err
+}
+
+func readNode(n *Node, fun ipldstream.ReadFun) error {
+	err := fun([]interface{}{}, ipldstream.TokenNode, nil)
+	if err != nil {
+		return err
+	}
+
+	err = fun([]interface{}{}, ipldstream.TokenKey, "data")
+	if err != nil && err != ipldstream.NodeReadSkip {
+		return err
+	} else if err != ipldstream.NodeReadSkip {
+
+		err = fun([]interface{}{"data"}, ipldstream.TokenValue, n.Data)
+		if err != nil && err != ipldstream.NodeReadSkip {
+			return err
+		}
+
+	}
+
+	err = fun([]interface{}{}, ipldstream.TokenKey, "links")
+	if err != nil && err != ipldstream.NodeReadSkip {
+		return err
+	} else if err != ipldstream.NodeReadSkip {
+
+		err = fun([]interface{}{"links"}, ipldstream.TokenArray, nil)
+		if err != nil && err != ipldstream.NodeReadSkip {
+			return err
+		} else if err != ipldstream.NodeReadSkip {
+
+			for i, lnk := range n.Links {
+
+				err = fun([]interface{}{"links"}, ipldstream.TokenIndex, i)
+				if err == ipldstream.NodeReadSkip {
+					continue
+				} else if err != nil {
+					return err
+				}
+
+				err = fun([]interface{}{"links", i}, ipldstream.TokenNode, nil)
+				if err == ipldstream.NodeReadSkip {
+					continue
+				} else if err != nil {
+					return err
+				}
+
+				err = fun([]interface{}{"links", i}, ipldstream.TokenKey, ipldlinks.LinkKey)
+				if err != nil && err != ipldstream.NodeReadSkip {
+					return err
+				} else if err != ipldstream.NodeReadSkip {
+
+					err = fun([]interface{}{"links", i, ipldlinks.LinkKey}, ipldstream.TokenValue, lnk.Hash.B58String())
+					if err != nil && err != ipldstream.NodeReadSkip {
+						return err
+					}
+
+				}
+
+				err = fun([]interface{}{"links", i}, ipldstream.TokenKey, "name")
+				if err != nil && err != ipldstream.NodeReadSkip {
+					return err
+				} else if err != ipldstream.NodeReadSkip {
+
+					err = fun([]interface{}{"links", i, "name"}, ipldstream.TokenValue, lnk.Name)
+					if err != nil && err != ipldstream.NodeReadSkip {
+						return err
+					}
+
+				}
+
+				err = fun([]interface{}{"links", i}, ipldstream.TokenKey, "size")
+				if err != nil && err != ipldstream.NodeReadSkip {
+					return err
+				} else if err != ipldstream.NodeReadSkip {
+
+					err = fun([]interface{}{"links", i, "size"}, ipldstream.TokenValue, uint64(lnk.Size))
+					if err != nil && err != ipldstream.NodeReadSkip {
+						return err
+					}
+
+				}
+
+				err = fun([]interface{}{"links", i}, ipldstream.TokenEndNode, nil)
+				if err != nil && err != ipldstream.NodeReadSkip {
+					return err
+				}
+
+			}
+
+			err = fun([]interface{}{"links"}, ipldstream.TokenEndArray, nil)
+			if err != nil && err != ipldstream.NodeReadSkip {
+				return err
+			}
+
+		}
+
+	}
+
+	return fun([]interface{}{}, ipldstream.TokenEndNode, nil)
 }
